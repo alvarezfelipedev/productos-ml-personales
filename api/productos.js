@@ -15,38 +15,57 @@ async function getAccessToken() {
     }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || "Token error");
-  return data.access_token;
+  if (!res.ok) throw new Error("Token error: " + JSON.stringify(data));
+  return { token: data.access_token, newRefresh: data.refresh_token };
 }
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET");
-
-  const offset = parseInt(req.query.offset || "0");
-  const limit = parseInt(req.query.limit || "50");
 
   try {
-    const token = await getAccessToken();
+    // 1. Verificar env vars
+    if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
+      return res.status(500).json({
+        error: "Faltan variables de entorno",
+        CLIENT_ID: !!CLIENT_ID,
+        CLIENT_SECRET: !!CLIENT_SECRET,
+        REFRESH_TOKEN: !!REFRESH_TOKEN,
+      });
+    }
 
-    // Buscar IDs de items del vendedor
-    const searchRes = await fetch(
-      `https://api.mercadolibre.com/sites/MLA/search?seller_id=${SELLER_ID}&limit=${limit}&offset=${offset}`,
+    // 2. Obtener token
+    const { token } = await getAccessToken();
+
+    // 3. Probar con search público (sin token)
+    const pubRes = await fetch(
+      `https://api.mercadolibre.com/sites/MLA/search?seller_id=${SELLER_ID}&limit=5`
+    );
+    const pubData = await pubRes.json();
+
+    // 4. Probar con items privados (con token)
+    const privRes = await fetch(
+      `https://api.mercadolibre.com/users/${SELLER_ID}/items/search?limit=5`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    const searchData = await searchRes.json();
+    const privData = await privRes.json();
 
-    console.log("search status:", searchRes.status);
-    console.log("search paging:", JSON.stringify(searchData.paging));
-    console.log("results count:", searchData.results?.length);
+    // 5. Probar con myfeeds
+    const myRes = await fetch(
+      `https://api.mercadolibre.com/users/${SELLER_ID}/items/search?status=active&limit=5`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const myData = await myRes.json();
 
-    const products = searchData.results || [];
-    const paging = searchData.paging || { total: 0 };
-
-    res.status(200).json({ products, paging });
+    res.status(200).json({
+      debug: true,
+      env_ok: { CLIENT_ID: !!CLIENT_ID, CLIENT_SECRET: !!CLIENT_SECRET, REFRESH_TOKEN: !!REFRESH_TOKEN },
+      token_ok: !!token,
+      public_search: { status: pubRes.status, total: pubData.paging?.total, results: pubData.results?.length, error: pubData.error },
+      private_items: { status: privRes.status, total: privData.paging?.total, results: privData.results?.length, error: privData.error, message: privData.message },
+      active_items: { status: myRes.status, total: myData.paging?.total, results: myData.results?.length, error: myData.error, message: myData.message },
+    });
 
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 }
