@@ -29,27 +29,22 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
 
-    const mlRes = await fetch(
-      `https://api.mercadolibre.com/users/${SELLER_ID}/items/search?limit=${limit}&offset=${offset}`,
+    // Buscar IDs de items del vendedor
+    const searchRes = await fetch(
+      `https://api.mercadolibre.com/sites/MLA/search?seller_id=${SELLER_ID}&limit=${limit}&offset=${offset}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    const { results: ids, paging } = await mlRes.json();
+    const searchData = await searchRes.json();
 
-    if (!ids || ids.length === 0) {
-      return res.status(200).json({ products: [], paging: { total: 0 } });
-    }
+    console.log("search status:", searchRes.status);
+    console.log("search paging:", JSON.stringify(searchData.paging));
+    console.log("results count:", searchData.results?.length);
 
-    // Fetch product details in batch
-    const detailRes = await fetch(
-      `https://api.mercadolibre.com/items?ids=${ids.join(",")}&attributes=id,title,price,thumbnail,permalink,condition,shipping,currency_id`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const details = await detailRes.json();
-    const products = details
-      .filter((d) => d.code === 200)
-      .map((d) => d.body);
+    const products = searchData.results || [];
+    const paging = searchData.paging || { total: 0 };
 
     res.status(200).json({ products, paging });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
